@@ -1,4 +1,4 @@
-from pyipatcher import patchfinder, logger, ipatcher
+from pyipatcher import ipatcher, logger, patchfinder
 
 try:
     from importlib.metadata import version
