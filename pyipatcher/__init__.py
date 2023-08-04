@@ -1,7 +1,8 @@
-from importlib.metadata import version
-import pyipatcher.patchfinder
-import pyipatcher.logger
-import pyipatcher.ipatcher
+from pyipatcher import patchfinder, logger, ipatcher
+
+try:
+    from importlib.metadata import version
+except ModuleNotFoundError:
+    from importlib_metadata import version
 
 __version__ = version(__package__)
-print(f'pyipatcher version: {__version__}')
