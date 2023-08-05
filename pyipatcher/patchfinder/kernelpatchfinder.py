@@ -1,28 +1,27 @@
 import logging
 
-from .patchfinder64 import patchfinder64
+from .patcher import ARM64Patcher
 
 logger = logging.getLogger(__name__)
 
 
-class kernelpatchfinder(patchfinder64):
-    def __init__(self, buf: bytes, verbose: bool):
-        super().__init__(buf)
+class kernelpatchfinder(ARM64Patcher):
+    def __init__(self, data: bytes):
+        super().__init__(data)
         self.kvers = 0
-        self.verbose = verbose
 
     @property
     def kernel_vers(self):
         if self.kvers:
             return self.kvers
-        xnu = self.get_str(b"root:xnu-", 4, end=True)
+        xnu = self.get_str(b'root:xnu-', 4, end=True)
         self.kvers = int(xnu)
         return self.kvers
 
     def get_amfi_patch(self):
-        amfi_str = b"entitlements too small"
+        amfi_str = b'entitlements too small'
         if self.kernel_vers >= 7938:
-            amfi_str = b"Internal Error: No cdhash found."
+            amfi_str = b'Internal Error: No cdhash found.'
         logger.debug(f'amfi_str={amfi_str.decode()}')
         ent_loc = self.memmem(amfi_str)
         if ent_loc == -1:
@@ -49,13 +48,13 @@ class kernelpatchfinder(patchfinder64):
                 return -1
         function = self.follow_call(next_bl)
         if function == 0:
-            logger.error("Could not find function bl")
+            logger.error('Could not find function bl')
             return -1
         logger.debug(f'Patching AMFI at {hex(function)}')
         self.apply_patch(function, b'\xe0\x03\x002\xc0\x03_\xd6')
 
     def get_root_volume_seal_is_broken_patch(self):
-        roothash_authenticated_string = b"\"root volume seal is broken %p\\n\""
+        roothash_authenticated_string = b'\'root volume seal is broken %p\\n\''
         roothash_authenticated_loc = self.memmem(roothash_authenticated_string)
         if roothash_authenticated_loc == -1:
             logger.error('Could not find roothash_authenticated_string')
@@ -77,11 +76,11 @@ class kernelpatchfinder(patchfinder64):
             logger.error('Could not find tbnz ref')
             return -1
         logger.debug(f'Patching tbnz at {hex(tbnz_ref)}')
-        self.apply_patch(tbnz_ref, b"\x1f \x03\xd5")
+        self.apply_patch(tbnz_ref, b'\x1f \x03\xd5')
 
     def get_update_rootfs_rw_patch(self):
         update_rootfs_rw_string = (
-            b"%s:%d: %s Updating mount to read/write mode is not allowed"
+            b'%s:%d: %s Updating mount to read/write mode is not allowed'
         )
         update_rootfs_rw_loc = self.memmem(update_rootfs_rw_string)
         if update_rootfs_rw_loc == -1:
@@ -111,20 +110,20 @@ class kernelpatchfinder(patchfinder64):
         )
         if ent_loc == -1:
             logger.error(
-                'Could not find \"%s::%s() Performing img4 validation outside of workloop\" str'
+                'Could not find \'%s::%s() Performing img4 validation outside of workloop\' str'
             )
             return -1
         logger.debug(
-            f'"\%s::%s() Performing img4 validation outside of workloop\" str loc at {hex(ent_loc)}'
+            f"'\%s::%s() Performing img4 validation outside of workloop\' str loc at {hex(ent_loc)}"
         )
         ent_ref = self.xref(ent_loc)
         if ent_ref == 0:
             logger.error(
-                'Could not find \"%s::%s() Performing img4 validation outside of workloop\" str ref'
+                'Could not find \'%s::%s() Performing img4 validation outside of workloop\' str ref'
             )
             return -1
         logger.debug(
-            f'\"%s::%s() Performing img4 validation outside of workloop\" str ref at {hex(ent_ref)}'
+            f'\'%s::%s() Performing img4 validation outside of workloop\' str ref at {hex(ent_ref)}'
         )
         logger.debug(f'Patching str ref')
         self.apply_patch(ent_ref + 12, b'\x00\x00\x80\xd2')
