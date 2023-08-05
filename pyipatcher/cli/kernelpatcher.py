@@ -1,50 +1,49 @@
+import logging
+
 import click
+
 from pyipatcher.patchfinder.kernelpatchfinder import kernelpatchfinder
-from pyipatcher.logger import get_my_logger
+
+logger = logging.getLogger(__name__)
+
 
 @click.command()
 @click.argument('input', type=click.File('rb'))
 @click.argument('output', type=click.File('wb'))
-@click.option(
-    '-a',
-    '--amfi',
-    'patch_amfi',
-    is_flag=True,
-    help='Patch AMFI'
-)
+@click.option('-a', '--amfi', 'patch_amfi', is_flag=True, help='Patch AMFI')
 @click.option(
     '-e',
     '--rootvol-seal',
     'rootvol_seal',
     is_flag=True,
-    help='Patch root volume seal is broken (iOS 15 Only)'
+    help='Patch root volume seal is broken (iOS 15 Only)',
 )
 @click.option(
     '-u',
     '--update-rootfs-rw',
     'update_rootfs_rw',
     is_flag=True,
-    help='Patch update_rootfs_rw (iOS 15 Only)'
+    help='Patch update_rootfs_rw (iOS 15 Only)',
 )
-
 @click.option(
     '-f',
     '--afu-img4-sigcheck',
     'afu_img4_sigpatch',
     is_flag=True,
-    help='Patch AppleFirmwareUpdate img4 signature check'
+    help='Patch AppleFirmwareUpdate img4 signature check',
 )
-
 @click.option(
-    '-v',
-    '--verbose',
-    'verbose',
-    is_flag=True,
-    help='Show more debug information'
+    '-v', '--verbose', 'verbose', is_flag=True, help='Show more debug information'
 )
-
-def kernelpatcher(input, output, patch_amfi, rootvol_seal, update_rootfs_rw, afu_img4_sigpatch, verbose):
-    logger = get_my_logger(verbose)
+def kernelpatcher(
+    input,
+    output,
+    patch_amfi,
+    rootvol_seal,
+    update_rootfs_rw,
+    afu_img4_sigpatch,
+    verbose,
+):
     kernel = input.read()
     if kernel[:4] == b'\xca\xfe\xba\xbe':
         logger.info('Detected fat macho kernel')

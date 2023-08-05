@@ -1,47 +1,36 @@
+import logging
+
 import click
+
 from pyipatcher.patchfinder.ibootpatchfinder import ibootpatchfinder
-from pyipatcher.logger import get_my_logger
+
+logger = logging.getLogger(__name__)
+
 
 @click.command()
 @click.argument('input', type=click.File('rb'))
 @click.argument('output', type=click.File('wb'))
 @click.option(
-    '-b',
-    '--boot-args',
-    metavar='"BOOTARGS"',
-    nargs=1,
-    help='Apply custom boot-args'
+    '-b', '--boot-args', metavar='"BOOTARGS"', nargs=1, help='Apply custom boot-args'
 )
-@click.option(
-    '-n',
-    '--unlock-nvram',
-    is_flag=True,
-    help='Apply unlock nvram patch'
-)
+@click.option('-n', '--unlock-nvram', is_flag=True, help='Apply unlock nvram patch')
 @click.option(
     '-c',
     '--cmd-handler',
     metavar='COMMAND POINTER',
     nargs=2,
     required=False,
-    help='Relocate command handler\'s pointer'
+    help='Relocate command handler\'s pointer',
 )
 @click.option(
-    '-r',
-    '--reboot-to-fsboot',
-    is_flag=True,
-    help='Apply change reboot to fsboot patch'
+    '-r', '--reboot-to-fsboot', is_flag=True, help='Apply change reboot to fsboot patch'
 )
 @click.option(
-    '-v',
-    '--verbose',
-    'verbose',
-    is_flag=True,
-    help='Show more debug information'
+    '-v', '--verbose', 'verbose', is_flag=True, help='Show more debug information'
 )
-
-def ibootpatcher(input, output, unlock_nvram, cmd_handler, reboot_to_fsboot, boot_args, verbose):
-    logger = get_my_logger(verbose)
+def ibootpatcher(
+    input, output, unlock_nvram, cmd_handler, reboot_to_fsboot, boot_args, verbose
+):
     ibpf = ibootpatchfinder(input.read(), verbose)
     if ibpf.has_kernel_load:
         if boot_args:
@@ -53,10 +42,14 @@ def ibootpatcher(input, output, unlock_nvram, cmd_handler, reboot_to_fsboot, boo
             logger.warning('Failed getting get_debug_enabled_patch()')
     if ibpf.has_recovery_console:
         if cmd_handler:
-            logger.info(f'Getting get_cmd_handler_patch({cmd_handler[0]}, {cmd_handler[1]})')
+            logger.info(
+                f'Getting get_cmd_handler_patch({cmd_handler[0]}, {cmd_handler[1]})'
+            )
             ptr = int(cmd_handler[1], 0)
             if ibpf.get_cmd_handler_patch(cmd_handler[0], ptr) == -1:
-                logger.warning(f'Failed getting get_cmd_handler_patch({cmd_handler[0]}, {cmd_handler[1]})')
+                logger.warning(
+                    f'Failed getting get_cmd_handler_patch({cmd_handler[0]}, {cmd_handler[1]})'
+                )
         if unlock_nvram:
             logger.info('Getting get_unlock_nvram_patch()')
             if ibpf.get_unlock_nvram_patch() == -1:
@@ -74,4 +67,3 @@ def ibootpatcher(input, output, unlock_nvram, cmd_handler, reboot_to_fsboot, boo
     logger.info(f'Writing out patched file to {output.name}')
     output.write(ibpf.output)
     return 0
-

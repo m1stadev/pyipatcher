@@ -1,7 +1,11 @@
-from .patchfinder64 import patchfinder64, arm64_branch_instruction
-from pyipatcher.logger import get_my_logger
+import logging
+
+from .patchfinder64 import arm64_branch_instruction, patchfinder64
+
+logger = logging.getLogger(__name__)
 
 verbose = 0
+
 
 class asrpatchfinder(patchfinder64):
     def __init__(self, buf: bytes, verbose: bool):
@@ -9,14 +13,13 @@ class asrpatchfinder(patchfinder64):
         self.verbose = verbose
 
     def get_asr_sigcheck_patch(self):
-        logger = get_my_logger(self.verbose)
         failed = self.memmem(b"Image failed signature verification")
-        if failed == -1: 
+        if failed == -1:
             logger.error('Could not find \"Image failed signature verification\"')
             return -1
         logger.debug(f'\"Image failed signature verification\" at {hex(failed)}')
         passed = self.memmem(b'Image passed signature verification')
-        if passed == -1: 
+        if passed == -1:
             logger.error('Could not find \"Image passed signature verification\"')
             return -1
         logger.debug(f"\"Image failed signature verification\" at {hex(passed)}")
@@ -31,6 +34,7 @@ class asrpatchfinder(patchfinder64):
         our_branch = arm64_branch_instruction(ref_failed, ref_passed)
         self.apply_patch(ref_failed, our_branch.to_bytes(4, byteorder='little'))
         return 0
+
     @property
     def output(self):
         return bytes(self._buf)

@@ -1,5 +1,3 @@
-from pyipatcher import ipatcher, logger, patchfinder
-
 try:
     from importlib.metadata import version
 except ModuleNotFoundError:

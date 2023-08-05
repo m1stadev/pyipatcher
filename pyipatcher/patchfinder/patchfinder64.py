@@ -1,10 +1,10 @@
-import struct
-import ctypes
 import binascii
+import ctypes
 import logging
-
+import struct
 
 logger = logging.getLogger(__name__)
+
 
 def BIT_RANGE(v, begin, end):
     return (v >> begin) % (1 << (end - begin + 1))
@@ -17,6 +17,7 @@ def BIT_AT(v, pos):
 def SET_BITS(v, begin):
     return v << begin
 
+
 def arm64_branch_instruction(from_, to):
     _from = ctypes.c_ulonglong(_from).value
     to = ctypes.c_ulonglong(to).value
@@ -28,11 +29,12 @@ def arm64_branch_instruction(from_, to):
         )
     ).value
 
+
 class ARM64Patcher:
     def __init__(self, data: bytes):
         if (len(data) % 4) != 0:
             raise TypeError('data size not divisible by 4')
-        
+
         self._data = data
 
     def __len__(self) -> int:
@@ -179,8 +181,8 @@ class ARM64Patcher:
         self._data[offset : offset + len(patch)] = patch
 
 
-#TODO: Proper tests
-#def test():
+# TODO: Proper tests
+# def test():
 #    set_package_name("test")
 #    kernel = open("kcache.raw", "rb").read()
 #    pf = patchfinder64(kernel)
