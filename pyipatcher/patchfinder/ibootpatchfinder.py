@@ -95,7 +95,6 @@ class ibootpatchfinder(patchfinder64):
         )
         bloff2 = self.step(bloff, self.size - bloff, 0x94000000, 0xFF000000)
         self.apply_patch(bloff2, b'\x20\x00\x80\xD2')
-        return 0
 
     def get_cmd_handler_patch(self, command, ptr):
         cmd = bytes('\0' + command + '\0', 'utf-8')
@@ -111,7 +110,6 @@ class ibootpatchfinder(patchfinder64):
             return -1
         logger.debug(f'cmd_ref={hex(cmd_ref + self.base)}')
         self.apply_patch(cmd_ref + 8, ptr.to_bytes(8, byteorder='little'))
-        return 0
 
     def get_unlock_nvram_patch(self):
         debuguart_loc = self.memmem(b'debug-uarts')
@@ -174,7 +172,6 @@ class ibootpatchfinder(patchfinder64):
             f'com_apple_system_begin={hex(com_apple_system_begin + self.base)}'
         )
         self.apply_patch(com_apple_system_begin, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
-        return 0
 
     def get_bootarg_patch(self, bootargs):
         _bootargs = bytes(bootargs, 'utf-8')
@@ -303,7 +300,7 @@ class ibootpatchfinder(patchfinder64):
                 return -1
         logger.debug(f'xrefRD={xrefRD}')
         if xrefRD == 4 or xrefRD > 9:
-            return 0
+            return
         cseloff = self.step(
             default_ba_xref, self.size - default_ba_xref, 0x1A800000, 0x7FE00C00
         )
@@ -352,7 +349,6 @@ class ibootpatchfinder(patchfinder64):
             f'({hex(adroff + self.base)})patching: "adr x{adrrd}, {hex(default_ba_str_loc + self.base)}"'
         )
         self.apply_patch(adroff, opcode3.to_bytes(4, byteorder='little'))
-        return 0
 
     def get_change_reboot_to_fsboot_patch(self):
         rebootstr = self.memmem(b'reboot\x00')
@@ -383,7 +379,6 @@ class ibootpatchfinder(patchfinder64):
         self.apply_patch(
             rebootrefstr + 8, (fsbootfunc - self.base).to_bytes(4, byteorder='little')
         )
-        return 0
 
     def get_sigcheck_patch(self):
         img4decodemanifestexists = 0
@@ -545,13 +540,12 @@ class ibootpatchfinder(patchfinder64):
                         self.apply_patch(
                             img4interposercallback_mov_x20, b'\x00\x00\x80\xD2'
                         )
-        return 0
 
     def get_freshnonce_patch(self):
         # check stage first
         if self.stage1:
             logger.debug('iBootStage1/iBSS detected, not patching nvram')
-            return 0
+            return
         logger.debug('Not iBootStage1/iBSS, continuing')
         noncevar_str = self.memmem(b'com.apple.System.boot-nonce\0')
         if noncevar_str == -1:
@@ -592,7 +586,6 @@ class ibootpatchfinder(patchfinder64):
         branch_loc = noncefun2_blref
         logger.debug(f'branch_loc={hex(branch_loc + self.base)}')
         self.apply_patch(branch_loc, b'\x1F\x20\x03\xD5')
-        return 0
 
     @property
     def output(self):

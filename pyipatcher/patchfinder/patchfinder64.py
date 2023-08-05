@@ -68,8 +68,6 @@ class ARM64Patcher:
             if (x & mask) == what:
                 return start
             start += 4
-        return 0
-
     def step_back(self, start, length, what, mask, reversed=False, dbg=False):
         end = start - length
         while start >= end:
@@ -87,7 +85,6 @@ class ARM64Patcher:
                     start -= 4
                 else:
                     return start
-        return 0
 
     def bof(self, where):
         '''Find the beginning of a function.'''
@@ -114,7 +111,6 @@ class ARM64Patcher:
                             where += 4
                             break
             where -= 4
-        return 0
 
     def follow_call(self, call):
         w = ctypes.c_longlong(
@@ -162,7 +158,6 @@ class ARM64Patcher:
                 value[reg] = adr + i
             if value[reg] == what:
                 return i
-        return 0
 
     def xrefcode(self, what, start=0, end=0):
         end = self.size & ~3 if not end else end & ~3
@@ -172,7 +167,6 @@ class ARM64Patcher:
                 where = self.follow_call(i)
                 if where == what:
                     return i
-        return 0
 
     def apply_patch(self, offset: int, patch: bytes):
         '''Apply a patch at offset'''

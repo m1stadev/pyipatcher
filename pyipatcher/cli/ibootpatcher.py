@@ -66,4 +66,3 @@ def ibootpatcher(
         logger.warning('Failed getting get_sigcheck_patch()')
     logger.info(f'Writing out patched file to {output.name}')
     output.write(ibpf.output)
-    return 0

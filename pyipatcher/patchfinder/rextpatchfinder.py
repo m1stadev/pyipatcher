@@ -25,7 +25,6 @@ class rextpatchfinder(patchfinder64):
                 if cbz + offset == start:
                     return cbz
             cbz -= 4
-        return 0
 
     def get_skip_sealing_patch(self):
         skip_sealing = self.memmem(b'Skipping sealing system volume')
@@ -51,7 +50,6 @@ class rextpatchfinder(patchfinder64):
         self.apply_patch(
             skip_sealing_ref_ref, our_branch.to_bytes(4, byteorder='little')
         )
-        return 0
 
     @property
     def output(self):

@@ -252,7 +252,6 @@ def rd(opcode, type) -> int:
         'pacizb',
     ):
         return opcode % (1 << 5)
-    return 0
 
 
 def rn(opcode, type) -> int:
@@ -278,18 +277,16 @@ def rn(opcode, type) -> int:
         'pacizb',
     ):
         return BIT_RANGE(opcode, 5, 9)
-    return 0
 
 
 def rm(opcode, type) -> int:
     if type == 'ccmp':
         if subtype(opcode, type) != 'reg':
-            return 0
+            return
     elif type in ('csel', 'mov', 'subs'):
         return BIT_RANGE(opcode, 16, 20)
     elif type == 'br':
         return BIT_RANGE(opcode, 0, 4)
-    return 0
 
 
 # -- INSTRUCTIONS --

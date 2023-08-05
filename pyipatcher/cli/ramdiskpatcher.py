@@ -47,4 +47,3 @@ def ramdiskpatcher(input, output, is_asr, is_rext, verbose):
         output.write(apf.output)
     else:
         output.write(rpf.output)
-    return 0

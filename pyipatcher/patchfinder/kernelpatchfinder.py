@@ -53,7 +53,6 @@ class kernelpatchfinder(patchfinder64):
             return -1
         logger.debug(f'Patching AMFI at {hex(function)}')
         self.apply_patch(function, b'\xe0\x03\x002\xc0\x03_\xd6')
-        return 0
 
     def get_root_volume_seal_is_broken_patch(self):
         roothash_authenticated_string = b"\"root volume seal is broken %p\\n\""
@@ -79,7 +78,6 @@ class kernelpatchfinder(patchfinder64):
             return -1
         logger.debug(f'Patching tbnz at {hex(tbnz_ref)}')
         self.apply_patch(tbnz_ref, b"\x1f \x03\xd5")
-        return 0
 
     def get_update_rootfs_rw_patch(self):
         update_rootfs_rw_string = (
@@ -106,7 +104,6 @@ class kernelpatchfinder(patchfinder64):
             return -1
         logger.debug(f'Patching tbnz at {hex(tbnz_ref2)}')
         self.apply_patch(tbnz_ref2, b'\x1f \x03\xd5')
-        return 0
 
     def get_AFU_img4_sigcheck_patch(self):
         ent_loc = self.memmem(
@@ -131,7 +128,6 @@ class kernelpatchfinder(patchfinder64):
         )
         logger.debug(f'Patching str ref')
         self.apply_patch(ent_ref + 12, b'\x00\x00\x80\xd2')
-        return 0
 
     @property
     def output(self):
