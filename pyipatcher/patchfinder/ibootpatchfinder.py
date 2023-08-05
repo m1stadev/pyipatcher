@@ -7,10 +7,10 @@ import logging
 import struct
 
 from pyipatcher.patchfinder import insn
-
-# from pyipatcher.patchfinder.patchfinder64 import patchfinder64
+from pyipatcher.types import iBootVersion
+# from pyipatcher.patchfinder.patcher import ARM64Patcher
 # from pyipatcher.patchfinder import insn
-from pyipatcher.patchfinder.patchfinder64 import patchfinder64
+from pyipatcher.patchfinder.patcher import ARM64Patcher
 
 logger = logging.getLogger(__name__)
 
@@ -22,23 +22,14 @@ def make_zeroes(n):
     return zeroes
 
 
-class ibootpatchfinder(patchfinder64):
-    def __init__(self, buf: bytes, verbose: bool):
-        super().__init__(buf)
-        self.verbose = verbose
-        self.vers, self.minor_vers = self.get_iboot_ver()
-        logger.debug(f'iBoot-{self.vers} inputted')
-        if self.vers >= 6671:
-            if 8419 <= self.vers <= 9000:
-                logger.info('iOS 16 iBoot detected!')
-            elif 7429 <= self.vers < 8419:
-                logger.info('iOS 15 iBoot detected!')
-            elif self.vers < 7429:
-                logger.info('iOS 14 iBoot detected!')
-        if self.vers < 3406:
-            raise NotImplementedError(
-                f'Unsupported iBoot (iBoot-{self.vers}.{self.minor_vers}), only iOS 10 or later iBoot is supported'
-            )
+class iBootPatcher(ARM64Patcher):
+    def __init__(self, data: bytes):
+        super().__init__(data)
+        logger.debug(f'iBoot version: {self.version.major}.{self.version.minor}')
+
+        if self.version.major < 3406:
+            raise NotImplementedError('iBoot version too outdated')
+        '''
         self.stage1 = (
             self._buf[0x200 : 0x200 + 5] == b'iBSS'
             or self._buf[0x200 : 0x200 + 11] == b'iBootStage1'
@@ -55,18 +46,24 @@ class ibootpatchfinder(patchfinder64):
             logger.debug(f'iBoot ChipID: {self.cpid}')
         self.base = self.get_base()
         logger.debug(f'Base address: {hex(self.base)}')
+        '''
 
     @property
     def has_kernel_load(self):
-        return self.memmem(b'__PAGEZERO') != -1
+        return self.find_str(b'__PAGEZERO') != -1
 
     @property
     def has_recovery_console(self):
-        return self.memmem(b'Entering recovery mode, starting command prompt') != 1
+        return self.find_str(b'Entering recovery mode, starting command prompt') != 1
 
-    def get_iboot_ver(self):
-        ver_arrs = self.get_str(b'iBoot-', 9, end=True).split(b'.')
-        return int(ver_arrs[0]), int(ver_arrs[1])
+    @property
+    def version(self) -> iBootVersion:
+        if hasattr(self, '_version') == False:
+            version_idx = self.find_str('iBoot-')
+            version_str = self.get_data(version_idx + 6, version_idx + 16).split(b'.')[:2]
+            self._version = iBootVersion(int(version_str[0]), int(version_str[1]))
+
+        return self._version
 
     def get_cpid(self):
         cpid = self.get_str(b'platform-name\x00', 5, end=True)
@@ -74,7 +71,7 @@ class ibootpatchfinder(patchfinder64):
 
     def get_base(self):
         offset = 0x300 if self.vers >= 6603 else 0x318
-        return struct.unpack("<Q", self._buf[offset : offset + 8])[0]
+        return struct.unpack('<Q', self._buf[offset : offset + 8])[0]
 
     def iboot_memmem(self, needle):
         needle = (needle + self.base).to_bytes(8, byteorder='little')
@@ -83,7 +80,7 @@ class ibootpatchfinder(patchfinder64):
     def get_debug_enabled_patch(self):
         debug_enabled_loc = self.memmem(b'debug-enabled')
         if debug_enabled_loc == -1:
-            logger.error('Could not find "debug-enabled"')
+            logger.error("Could not find 'debug-enabled'")
         logger.debug(f'debug_enabled_loc={hex(debug_enabled_loc + self.base)}')
         debug_enabled_ref = self.xref(debug_enabled_loc)
         if debug_enabled_ref == 0:
@@ -91,23 +88,23 @@ class ibootpatchfinder(patchfinder64):
             return -1
         logger.debug(f'debug_enabled_ref={hex(debug_enabled_ref + self.base)}')
         bloff = self.step(
-            debug_enabled_ref, self.size - debug_enabled_ref, 0x94000000, 0xFF000000
+            debug_enabled_ref, len(self) - debug_enabled_ref, 0x94000000, 0xFF000000
         )
-        bloff2 = self.step(bloff, self.size - bloff, 0x94000000, 0xFF000000)
+        bloff2 = self.step(bloff, len(self) - bloff, 0x94000000, 0xFF000000)
         self.apply_patch(bloff2, b'\x20\x00\x80\xD2')
 
     def get_cmd_handler_patch(self, command, ptr):
         cmd = bytes('\0' + command + '\0', 'utf-8')
         cmd_loc = self.memmem(cmd)
         if cmd_loc == -1:
-            logger.error(f'Could not find command \"{command}\"')
-            return -1
+            logger.error(f"Could not find command \'{command}\'")
+            return
         cmd_loc += 1
         logger.debug(f'cmd_loc={hex(cmd_loc + self.base)}')
         cmd_ref = self.iboot_memmem(cmd_loc)
         if cmd_ref == -1:
             logger.error('Could not find command ref')
-            return -1
+            return
         logger.debug(f'cmd_ref={hex(cmd_ref + self.base)}')
         self.apply_patch(cmd_ref + 8, ptr.to_bytes(8, byteorder='little'))
 
@@ -115,7 +112,7 @@ class ibootpatchfinder(patchfinder64):
         debuguart_loc = self.memmem(b'debug-uarts')
         if debuguart_loc == -1:
             logger.error('Could not find debug-uarts string')
-            return -1
+            return
         logger.debug(f'debuguart_loc={hex(debuguart_loc + self.base)}')
         debuguart_ref = self.iboot_memmem(debuguart_loc)
         logger.debug(f'debuguart_ref={hex(debuguart_ref + self.base)}')
@@ -200,14 +197,14 @@ class ibootpatchfinder(patchfinder64):
                 logger.error('Could not find adr1')
                 return -1
             logger.debug(f'adr1={hex(adr1 + self.base)}')
-            boff = self.step(adr1, self.size - adr1, 0x14000000, 0xFC000000)
+            boff = self.step(adr1, len(self) - adr1, 0x14000000, 0xFC000000)
             bastackvarbranch = insn.imm(boff, self.get_insn(boff), 'b')
             if bastackvarbranch == -1:
                 logger.error('Could not find bastackvarbranch')
                 return -1
             logger.debug(f'bastackvarbranch={hex(bastackvarbranch)}')
             bloff = self.step(
-                bastackvarbranch, self.size - bastackvarbranch, 0x94000000, 0xFF000000
+                bastackvarbranch, len(self) - bastackvarbranch, 0x94000000, 0xFF000000
             )
             nopoff = self.step_back(bloff, bloff, 0xD503201F, 0xFFFFFFFF)
             default_ba_xref = bastackvar = nopoff
@@ -247,7 +244,7 @@ class ibootpatchfinder(patchfinder64):
         else:
             cert_str_loc = self.memmem(b'Apple Inc.1')
             if cert_str_loc == -1:
-                logger.error('Could not find "Apple Inc.1" string')
+                logger.error("Could not find 'Apple Inc.1' string")
                 return -1
             logger.debug(f'cert_str_loc={hex(cert_str_loc + self.base)}')
             logger.debug(
@@ -260,11 +257,11 @@ class ibootpatchfinder(patchfinder64):
                 return -1
             adr2 = self.memmem(b' -restore')
             if adr2 == -1:
-                logger.error('Could not find " -restore" string')
+                logger.error("Could not find ' -restore' string")
                 return -1
             adr2_xref = self.xref(adr2)
             if adr2_xref == 0:
-                logger.error('Could not find " -restore" string xref')
+                logger.error("Could not find ' -restore' string xref")
                 return -1
             suboff = self.step_back(adr2_xref, adr2_xref, 0xD1000000, 0xFF000000)
             _reg = insn.rd(self.get_insn(suboff), 'sub')
@@ -286,7 +283,7 @@ class ibootpatchfinder(patchfinder64):
                 _reg = insn.rd(self.get_insn(default_ba_xref), 'adr')
         opcode = insn.new_insn_adr(default_ba_xref, default_ba_str_loc, _reg)
         self.apply_patch(default_ba_xref, opcode.to_bytes(4, byteorder='little'))
-        logger.debug(f'Applying custom boot-args "{bootargs}"')
+        logger.debug(f"Applying custom boot-args '{bootargs}'")
         self.apply_patch(default_ba_str_loc, _bootargs)
         if _6723_100 or _7429_0:
             xrefRD = 4
@@ -302,7 +299,7 @@ class ibootpatchfinder(patchfinder64):
         if xrefRD == 4 or xrefRD > 9:
             return
         cseloff = self.step(
-            default_ba_xref, self.size - default_ba_xref, 0x1A800000, 0x7FE00C00
+            default_ba_xref, len(self) - default_ba_xref, 0x1A800000, 0x7FE00C00
         )
         logger.debug(f'cseloff={hex(cseloff + self.base)}')
         if not (
@@ -318,7 +315,7 @@ class ibootpatchfinder(patchfinder64):
         logger.debug(f'cselRD={cselRD}')
         opcode2 = insn.new_register_mov(cseloff, 0, cselRD, -1, xrefRD)
         logger.debug(
-            f'({hex(cseloff + self.base)})patching: "mov x{cselRD}, x{xrefRD}"'
+            f"({hex(cseloff + self.base)})patching: 'mov x{cselRD}, x{xrefRD}'"
         )
         self.apply_patch(cseloff, opcode2.to_bytes(4, byteorder='little'))
         cseloff -= 4
@@ -335,7 +332,7 @@ class ibootpatchfinder(patchfinder64):
             return -1
         logger.debug(f'branch_dst={hex(cseloff + self.base)}')
         if insn.get_type(self.get_insn(cseloff)) != 'adr':
-            adroff = self.step(cseloff, self.size - cseloff, 0x10000000, 0x9F000000)
+            adroff = self.step(cseloff, len(self) - cseloff, 0x10000000, 0x9F000000)
         else:
             adroff = cseloff
         opcode3 = insn.new_insn_adr(
@@ -346,7 +343,7 @@ class ibootpatchfinder(patchfinder64):
             ),
         )
         logger.debug(
-            f'({hex(adroff + self.base)})patching: "adr x{adrrd}, {hex(default_ba_str_loc + self.base)}"'
+            f"({hex(adroff + self.base)})patching: 'adr x{adrrd}, {hex(default_ba_str_loc + self.base)}'"
         )
         self.apply_patch(adroff, opcode3.to_bytes(4, byteorder='little'))
 
@@ -423,13 +420,13 @@ class ibootpatchfinder(patchfinder64):
         )
         adroff = self.step(
             img4decodemanifestexists_ref,
-            self.size - img4decodemanifestexists_ref,
+            len(self) - img4decodemanifestexists_ref,
             0x10000000,
             0x9F000000,
         )
         if insn.rd(self.get_insn(adroff), 'adr') != 2:
             adroff = self.step(
-                img4decodemanifestexists_ref, self.size - adroff, 0x10000000, 0x9F000000
+                img4decodemanifestexists_ref, len(self) - adroff, 0x10000000, 0x9F000000
             )
             if insn.rd(self.get_insn(adroff), 'adr') != 2:
                 logger.error('Could not find adroff')
@@ -446,7 +443,7 @@ class ibootpatchfinder(patchfinder64):
         logger.debug(f'img4interposercallback={hex(img4interposercallback)}')
         real_img4interposercallback = self.step(
             real_img4interposercallback,
-            self.size - real_img4interposercallback,
+            len(self) - real_img4interposercallback,
             0xD65F03C0,
             0xFFFFFFFF,
         )
@@ -464,7 +461,7 @@ class ibootpatchfinder(patchfinder64):
             real_img4interposercallback += 4
             img4interposercallback_ret2 = self.step(
                 real_img4interposercallback + 4,
-                self.size - real_img4interposercallback,
+                len(self) - real_img4interposercallback,
                 0xD65F03C0,
                 0xFFFFFFFF,
             )
@@ -501,12 +498,12 @@ class ibootpatchfinder(patchfinder64):
                 self.apply_patch(img4interposercallback_mov, b'\x00\x00\x80\xD2')
                 retoff = self.step(
                     real_img4interposercallback,
-                    self.size - real_img4interposercallback,
+                    len(self) - real_img4interposercallback,
                     0xD65F03C0,
                     0xFFFFFFFF,
                 )
                 img4interposercallback_ret2 = self.step(
-                    retoff + 4, self.size - retoff, 0xD65F03C0, 0xFFFFFFFF
+                    retoff + 4, len(self) - retoff, 0xD65F03C0, 0xFFFFFFFF
                 )
                 if img4interposercallback_ret2 == 0:
                     logger.error('Could not find img4interposercallback_ret2')
@@ -549,7 +546,7 @@ class ibootpatchfinder(patchfinder64):
         logger.debug('Not iBootStage1/iBSS, continuing')
         noncevar_str = self.memmem(b'com.apple.System.boot-nonce\0')
         if noncevar_str == -1:
-            logger.error('Could not find "com.apple.System.boot-nonce"')
+            logger.error("Could not find 'com.apple.System.boot-nonce'")
             return -1
         logger.debug(f'noncevar_str={hex(noncevar_str + self.base)}')
         noncevar_ref = self.xref(noncevar_str)
