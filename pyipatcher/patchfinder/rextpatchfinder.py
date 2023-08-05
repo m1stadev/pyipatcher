@@ -7,25 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 class rextpatchfinder(patchfinder64):
-    def __init__(self, buf: bytes, verbose: bool):
-        super().__init__(buf)
-        self.verbose = verbose
-
-    def cbz_ref_back(self, start, length):
-        cbz_mask = 0x7E000000
-        instr = 0
-        offset = 0
-        imm = 0
-        cbz = start
-        while cbz:
-            instr = struct.unpack("<I", self._buf[cbz : cbz + 4])[0]
-            if instr & cbz_mask == 0x34000000:
-                imm = ((instr & 0x00FFFFFF) >> 5) << 2
-                offset = imm
-                if cbz + offset == start:
-                    return cbz
-            cbz -= 4
-
     def get_skip_sealing_patch(self):
         skip_sealing = self.memmem(b'Skipping sealing system volume')
         if skip_sealing == -1:

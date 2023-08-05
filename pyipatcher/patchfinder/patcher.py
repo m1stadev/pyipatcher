@@ -9,18 +9,6 @@ from pyipatcher.errors import InvalidDataError
 logger = logging.getLogger(__name__)
 
 
-def BIT_RANGE(v, begin, end):
-    return (v >> begin) % (1 << (end - begin + 1))
-
-
-def BIT_AT(v, pos):
-    return (v >> pos) % 2
-
-
-def SET_BITS(v, begin):
-    return v << begin
-
-
 def arm64_branch_instruction(from_, to) -> int:
     from_ = ctypes.c_ulonglong(from_).value
     to = ctypes.c_ulonglong(to).value
@@ -47,23 +35,27 @@ class ARM64Patcher:
     def __len__(self) -> int:
         return len(self._data)
 
+    @property
+    def data(self) -> bytes:
+        return self._data
+
     def find_str(
         self, string: Union[bytes, str], start: int = 0, end: Optional[int] = None
     ) -> int:
-        '''Locate a substring.'''
+        '''Locate where a substring is.'''
 
         if type(string) == str:
-            string = bytes(str)
+            string = str.encode(string)
 
         return self._data.find(string, start, end or len(self))
 
     def find_insn(self, index: int) -> int:
-        '''Locate an instruction.'''
+        '''Locate where an instruction is.'''
 
         return struct.unpack('<I', self._data[index : index + 4])[0]
 
     def find_ptr(self, index: int) -> int:
-        '''Locate a pointer.'''
+        '''Locate where a pointer is.'''
 
         return struct.unpack('<Q', self._data[index : index + 8])[0]
 
@@ -72,7 +64,7 @@ class ARM64Patcher:
     ) -> int:
         '''Locate the next value with a specified bitmask, with the ability to search backwards via the 'reverse' argument.'''
 
-        if reverse == False:
+        if not reverse:
             while start <= start + length:
                 x = struct.unpack('<I', self._data[start : start + 4])[0]
                 if (x & mask) == value:
@@ -179,6 +171,33 @@ class ARM64Patcher:
                 if where == addr:
                     return i
 
+    def cbz_ref(self, start: int = 0, reverse: bool = False):
+        CBZ_MASK = 0x7E000000
+        cbz = start
+
+        if not reverse:
+            while cbz:
+                insn = struct.unpack('<I', self._buf[cbz : cbz + 4])[0]
+                if insn & CBZ_MASK == 0x34000000:
+                    offset = ((insn & 0x00FFFFFF) >> 5) << 2
+                    if cbz + offset == start:
+                        return cbz
+
+                    cbz += 4
+        else:
+            while cbz:
+                insn = struct.unpack('<I', self._buf[cbz : cbz + 4])[0]
+                if insn & CBZ_MASK == 0x34000000:
+                    offset = ((insn & 0x00FFFFFF) >> 5) << 2
+                    if cbz + offset == start:
+                        return cbz
+
+                    cbz -= 4
+
+    def get_data(self, index: int, length: int) -> bytes:
+        '''Get a chunk of data.'''
+        return self._data[index : index + length]
+
     def apply_patch(self, offset: int, patch: bytes):
         '''Apply a patch at offset.'''
 
@@ -190,7 +209,7 @@ class ARM64Patcher:
 # def test():
 #    set_package_name('test')
 #    kernel = open('kcache.raw', 'rb').read()
-#    pf = patchfinder64(kernel)
+#    pf = ARM64Patcher(kernel)
 #    ret = pf.step(16223228, 100, 0x94000000, 0xFC000000)
 
 #    print(f'returned: {pf.step(ret, 100, 0x94000000, 0xFC000000)}')
