@@ -2,15 +2,16 @@
 # https://github.com/dayt0n/kairos
 # https://github.com/Cryptiiiic/liboffsetfinder64
 
-import ctypes
 import logging
 import struct
+from functools import cached_property
 
 from pyipatcher.patchfinder import insn
-from pyipatcher.types import iBootVersion
+
 # from pyipatcher.patchfinder.patcher import ARM64Patcher
 # from pyipatcher.patchfinder import insn
 from pyipatcher.patchfinder.patcher import ARM64Patcher
+from pyipatcher.types import iBootStage, iBootVersion
 
 logger = logging.getLogger(__name__)
 
@@ -27,51 +28,55 @@ class iBootPatcher(ARM64Patcher):
         super().__init__(data)
         logger.debug(f'iBoot version: {self.version.major}.{self.version.minor}')
 
-        if self.version.major < 3406:
+        if self.version.major < 3406:  # iOS 10b2
             raise NotImplementedError('iBoot version too outdated')
-        '''
-        self.stage1 = (
-            self._buf[0x200 : 0x200 + 5] == b'iBSS'
-            or self._buf[0x200 : 0x200 + 11] == b'iBootStage1'
-        )
-        logger.debug(f'stage1={self.stage1}')
-        self.stage2 = (
-            self._buf[0x200 : 0x200 + 5] == b'iBEC'
-            or self._buf[0x200 : 0x200 + 11] == b'iBootStage2'
-        )
-        logger.debug(f'stage2={self.stage2}')
-        self.cpid = 0
-        if not self.stage1:
-            self.cpid = self.get_cpid()
-            logger.debug(f'iBoot ChipID: {self.cpid}')
-        self.base = self.get_base()
-        logger.debug(f'Base address: {hex(self.base)}')
-        '''
 
-    @property
-    def has_kernel_load(self):
-        return self.find_str(b'__PAGEZERO') != -1
+    @cached_property
+    def base(self) -> int:
+        offset = 0x300 if self.version.major >= 6603 else 0x318  # iOS 14b1
+        return struct.unpack('<Q', self.get_data(offset, 8))[0]
 
-    @property
-    def has_recovery_console(self):
-        return self.find_str(b'Entering recovery mode, starting command prompt') != 1
+    @cached_property
+    def chip_id(self):
+        if self.stage != iBootStage.STAGE_2:
+            raise ValueError('Provided iBoot is not stage 2')
 
-    @property
+        cpid_idx = self.find_str('platform-name') + 1
+        cpid = ''
+        while True:
+            char = self.get_data(cpid_idx, 1).decode()
+
+            # Only get the numbers from the SoC name
+            if char.isdigit():
+                cpid += char
+            elif char == ' ':
+                break
+
+            cpid_idx += 1
+
+        return int(cpid, 16)
+
+    @cached_property
+    def has_kernel_load(self) -> bool:
+        return self.find_str('__PAGEZERO') != -1
+
+    @cached_property
+    def has_recovery_console(self) -> bool:
+        return self.find_str('Entering recovery mode, starting command prompt') != 1
+
+    @cached_property
+    def stage(self) -> iBootStage:
+        if self.find_str('iBootStage1') != -1:
+            return iBootStage.STAGE_1
+        elif self.find_str('iBootStage2') != -1:
+            return iBootStage.STAGE_2
+
+    @cached_property
     def version(self) -> iBootVersion:
-        if hasattr(self, '_version') == False:
-            version_idx = self.find_str('iBoot-')
-            version_str = self.get_data(version_idx + 6, version_idx + 16).split(b'.')[:2]
-            self._version = iBootVersion(int(version_str[0]), int(version_str[1]))
+        vers_idx = self.find_str('iBoot-')
+        vers_str = self.get_data(vers_idx + 6, 10).split(b'.')[:2]
 
-        return self._version
-
-    def get_cpid(self):
-        cpid = self.get_str(b'platform-name\x00', 5, end=True)
-        return int(cpid[1:])
-
-    def get_base(self):
-        offset = 0x300 if self.vers >= 6603 else 0x318
-        return struct.unpack('<Q', self._buf[offset : offset + 8])[0]
+        return iBootVersion(int(vers_str[0]), int(vers_str[1]))
 
     def iboot_memmem(self, needle):
         needle = (needle + self.base).to_bytes(8, byteorder='little')
