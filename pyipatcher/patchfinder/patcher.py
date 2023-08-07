@@ -4,7 +4,7 @@ import logging
 import struct
 from typing import Optional, Union
 
-from pyipatcher.errors import InvalidDataError
+from pyipatcher.errors import InvalidDataError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,11 @@ class ARM64Patcher:
         if type(string) == str:
             string = str.encode(string)
 
-        return self._data.find(string, start, end or len(self))
+        str_idx = self._data.find(string, start, end or len(self))
+        if str_idx == -1:
+            raise NotFoundError('string', string.decode())
+
+        return str_idx
 
     def find_insn(self, index: int) -> int:
         '''Locate where an instruction is.'''
@@ -160,8 +164,10 @@ class ARM64Patcher:
             if value[reg] == index:
                 return i
 
+        raise NotFoundError('xref')
+
     def xrefcode(self, addr: int) -> int:
-        '''Find an xref that leads to an address.'''
+        '''Find a cross reference that leads to an address.'''
 
         end = len(self) & ~3
         for i in range(end=end, step=4):
@@ -198,7 +204,7 @@ class ARM64Patcher:
         '''Get a chunk of data.'''
         return self._data[index : index + length]
 
-    def apply_patch(self, offset: int, patch: bytes):
+    def patch_data(self, offset: int, patch: bytes):
         '''Apply a patch at offset.'''
 
         logger.debug(f'Applying patch at {hex(offset)}: {binascii.hexlify(patch)}')

@@ -6,12 +6,13 @@ import logging
 import struct
 from functools import cached_property
 
+from pyipatcher.errors import NotFoundError
 from pyipatcher.patchfinder import insn
 
 # from pyipatcher.patchfinder.patcher import ARM64Patcher
 # from pyipatcher.patchfinder import insn
 from pyipatcher.patchfinder.patcher import ARM64Patcher
-from pyipatcher.types import iBootStage, iBootVersion
+from pyipatcher.types import iBootPatch, iBootStage, iBootVersion
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class iBootPatcher(ARM64Patcher):
         return struct.unpack('<Q', self.get_data(offset, 8))[0]
 
     @cached_property
-    def chip_id(self):
+    def chip_id(self) -> int:
         if self.stage != iBootStage.STAGE_2:
             raise ValueError('Provided iBoot is not stage 2')
 
@@ -58,18 +59,38 @@ class iBootPatcher(ARM64Patcher):
 
     @cached_property
     def has_kernel_load(self) -> bool:
-        return self.find_str('__PAGEZERO') != -1
+        try:
+            self.find_str('__PAGEZERO')
+            return True
+        except NotFoundError:
+            return False
 
     @cached_property
     def has_recovery_console(self) -> bool:
-        return self.find_str('Entering recovery mode, starting command prompt') != 1
+        try:
+            self.find_str('Entering recovery mode, starting command prompt')
+            return True
+        except NotFoundError:
+            return False
 
     @cached_property
     def stage(self) -> iBootStage:
-        if self.find_str('iBootStage1') != -1:
+        if self.chip_id > 0x8010:
+            # TODO: A10+ has unified iBoot, error out
+            pass
+        try:
+            self.find_str('iBootStage1')
             return iBootStage.STAGE_1
-        elif self.find_str('iBootStage2') != -1:
+        except NotFoundError:
+            pass
+
+        try:
+            self.find_str('iBootStage2')
             return iBootStage.STAGE_2
+        except NotFoundError:
+            pass
+
+        # TODO: Error out
 
     @cached_property
     def version(self) -> iBootVersion:
@@ -82,20 +103,33 @@ class iBootPatcher(ARM64Patcher):
         needle = (needle + self.base).to_bytes(8, byteorder='little')
         return self.memmem(needle)
 
-    def get_debug_enabled_patch(self):
-        debug_enabled_loc = self.memmem(b'debug-enabled')
-        if debug_enabled_loc == -1:
-            logger.error("Could not find 'debug-enabled'")
-        logger.debug(f'debug_enabled_loc={hex(debug_enabled_loc + self.base)}')
-        debug_enabled_ref = self.xref(debug_enabled_loc)
-        if debug_enabled_ref == 0:
-            logger.error('Could not find debug_enabled_ref')
-            return -1
-        logger.debug(f'debug_enabled_ref={hex(debug_enabled_ref + self.base)}')
+    def apply_patch(self, patch: iBootPatch) -> None:
+        match patch:
+            case iBootPatch.DEBUG_ENABLED:
+                self.patch_debug_enabled()
+            case iBootPatch.UNLOCK_NVRAM:
+                pass
+            case iBootPatch.REBOOT_TO_FSBOOT:
+                pass
+            case iBootPatch.SIG_CHECKS:
+                pass
+            case iBootPatch.FRESH_NONCE:
+                pass
+            case _:
+                raise ValueError('Invalid iBoot patch provided')
+
+    def patch_debug_enabled(self):
+        logger.debug('Applying debug enabled patch')
+
+        de_idx = self.find_str('debug-enabled')
+        de_xref = self.xref(de_idx)
+
         bloff = self.step(
-            debug_enabled_ref, len(self) - debug_enabled_ref, 0x94000000, 0xFF000000
+            de_xref, len(self) - de_xref, 0x94000000, 0xFF000000
         )
         bloff2 = self.step(bloff, len(self) - bloff, 0x94000000, 0xFF000000)
+
+        # movz x0, #0x1
         self.apply_patch(bloff2, b'\x20\x00\x80\xD2')
 
     def get_cmd_handler_patch(self, command, ptr):
