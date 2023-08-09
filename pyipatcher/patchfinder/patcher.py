@@ -64,7 +64,12 @@ class ARM64Patcher:
         return struct.unpack('<Q', self._data[index : index + 8])[0]
 
     def step(
-        self, start: int, target: int, mask: int, end: Optional[int] = None, reverse: bool = False
+        self,
+        start: int,
+        target: int,
+        mask: int,
+        end: Optional[int] = None,
+        reverse: bool = False,
     ) -> int:
         '''Locate the next value with a specified bitmask, with the ability to search backwards via the 'reverse' argument.'''
         if end is None:
@@ -109,6 +114,8 @@ class ARM64Patcher:
                             break
             index -= 4
 
+        raise NotFoundError('beginning of function')
+
     def follow_call(self, call: int) -> int:
         '''Find the address of a call.'''
 
@@ -123,7 +130,7 @@ class ARM64Patcher:
 
         value = [0] * 32
         end = len(self) & ~3
-        for i in range(stop=end, step=4):
+        for i in range(0, end, 4):
             op = struct.unpack('<I', self._data[i : i + 4])[0]
             reg = op & 0x1F
             if (op & 0x9F000000) == 0x90000000:

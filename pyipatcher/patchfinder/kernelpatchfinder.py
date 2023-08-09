@@ -5,7 +5,7 @@ from .patcher import ARM64Patcher
 logger = logging.getLogger(__name__)
 
 
-class kernelpatchfinder(ARM64Patcher):
+class KernelPatcher(ARM64Patcher):
     def __init__(self, data: bytes):
         super().__init__(data)
         self.kvers = 0

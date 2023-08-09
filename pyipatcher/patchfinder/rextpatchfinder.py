@@ -1,12 +1,11 @@
 import logging
-import struct
 
 from pyipatcher.patchfinder.patcher import ARM64Patcher, arm64_branch_instruction
 
 logger = logging.getLogger(__name__)
 
 
-class rextpatchfinder(ARM64Patcher):
+class REXTPatcher(ARM64Patcher):
     def get_skip_sealing_patch(self):
         skip_sealing = self.find_str(b'Skipping sealing system volume')
         if skip_sealing == -1:

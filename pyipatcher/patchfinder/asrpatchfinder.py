@@ -7,11 +7,7 @@ logger = logging.getLogger(__name__)
 verbose = 0
 
 
-class asrpatchfinder(ARM64Patcher):
-    def __init__(self, buf: bytes, verbose: bool):
-        super().__init__(buf)
-        self.verbose = verbose
-
+class ASRPatcher(ARM64Patcher):
     def get_asr_sigcheck_patch(self):
         failed = self.memmem(b'Image failed signature verification')
         if failed == -1:
