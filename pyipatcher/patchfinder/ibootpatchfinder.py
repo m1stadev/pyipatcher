@@ -124,13 +124,16 @@ class iBootPatcher(ARM64Patcher):
         de_idx = self.find_str('debug-enabled')
         de_xref = self.xref(de_idx)
 
-        bloff = self.step(
-            de_xref, len(self) - de_xref, 0x94000000, 0xFF000000
-        )
-        bloff2 = self.step(bloff, len(self) - bloff, 0x94000000, 0xFF000000)
+        for _ in range(2):
+            de_xref = self.step(
+                de_xref, 0x94000000, 0xFF000000
+            )
+
+        bl_insn = de_xref
 
         # movz x0, #0x1
-        self.apply_patch(bloff2, b'\x20\x00\x80\xD2')
+        self.patch_data(bl_insn, b'\x20\x00\x80\xD2')
+
 
     def get_cmd_handler_patch(self, command, ptr):
         cmd = bytes('\0' + command + '\0', 'utf-8')

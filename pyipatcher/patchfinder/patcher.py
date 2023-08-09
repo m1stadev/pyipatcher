@@ -30,14 +30,14 @@ class ARM64Patcher:
         if (len(data) % 4) != 0:
             raise InvalidDataError('data size not divisible by 4')
 
-        self._data = data
+        self._data = bytearray(data)
 
     def __len__(self) -> int:
         return len(self._data)
 
     @property
     def data(self) -> bytes:
-        return self._data
+        return bytes(self._data)
 
     def find_str(
         self, string: Union[bytes, str], start: int = 0, end: Optional[int] = None
@@ -64,24 +64,25 @@ class ARM64Patcher:
         return struct.unpack('<Q', self._data[index : index + 8])[0]
 
     def step(
-        self, length: int, value: int, mask: int, start: int = 0, reverse: bool = False
+        self, start: int, target: int, mask: int, end: Optional[int] = None, reverse: bool = False
     ) -> int:
         '''Locate the next value with a specified bitmask, with the ability to search backwards via the 'reverse' argument.'''
+        if end is None:
+            end = len(self)
 
         if not reverse:
-            while start <= start + length:
-                x = struct.unpack('<I', self._data[start : start + 4])[0]
-                if (x & mask) == value:
-                    return start
-
+            while start + 4 <= end:
                 start += 4
-        else:
-            while start >= start + length:
                 x = struct.unpack('<I', self._data[start : start + 4])[0]
-                if (x & mask) == value:
+                if (x & mask) == target:
                     return start
 
+        else:
+            while start - 4 <= end:
                 start -= 4
+                x = struct.unpack('<I', self._data[start : start + 4])[0]
+                if (x & mask) == target:
+                    return start
 
     def bof(self, index: int) -> int:
         '''Find the beginning of a function.'''
@@ -207,7 +208,7 @@ class ARM64Patcher:
     def patch_data(self, offset: int, patch: bytes):
         '''Apply a patch at offset.'''
 
-        logger.debug(f'Applying patch at {hex(offset)}: {binascii.hexlify(patch)}')
+        logger.debug(f'Applying patch at {hex(offset)}: {patch.hex()}')
         self._data[offset : offset + len(patch)] = patch
 
 
