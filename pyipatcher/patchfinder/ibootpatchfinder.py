@@ -101,14 +101,14 @@ class iBootPatcher(ARM64Patcher):
 
     def iboot_memmem(self, needle):
         needle = (needle + self.base).to_bytes(8, byteorder='little')
-        return self.memmem(needle)
+        return self.find_str(needle)
 
     def apply_patch(self, patch: iBootPatch) -> None:
         match patch:
             case iBootPatch.DEBUG_ENABLED:
                 self.patch_debug_enabled()
             case iBootPatch.UNLOCK_NVRAM:
-                pass
+                self.patch_unlock_nvram()
             case iBootPatch.REBOOT_TO_FSBOOT:
                 pass
             case iBootPatch.SIG_CHECKS:
@@ -125,15 +125,51 @@ class iBootPatcher(ARM64Patcher):
         de_xref = self.xref(de_idx)
 
         for _ in range(2):
-            de_xref = self.step(
-                de_xref, 0x94000000, 0xFF000000
-            )
+            de_xref = self.step(de_xref, 0x94000000, 0xFF000000)
 
         bl_insn = de_xref
 
         # movz x0, #0x1
         self.patch_data(bl_insn, b'\x20\x00\x80\xD2')
 
+    def patch_unlock_nvram(self):
+        logger.debug('Applying unlock nvram patch')
+
+        du_idx = self.find_str('debug-uarts')
+        du_xref = self.iboot_memmem(du_idx)
+
+        whitelist1 = du_xref
+        while True:
+            whitelist1 -= 8
+            if self.find_ptr(whitelist1) == 0:
+                break
+
+        whitelist1 += 8
+        blacklistfunc = self.xref(whitelist1)
+        blacklistfunc_bof = self.bof(blacklistfunc)
+
+        # movz x0, #0; ret
+        self.patch_data(blacklistfunc_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
+
+        whitelist2 = whitelist1
+        while True:
+            whitelist2 += 8
+            if self.find_ptr(whitelist2) == 0:
+                break
+
+        whitelist2 += 8
+        blacklistfunc2 = self.xref(whitelist2)
+        blacklistfunc2_bof = self.bof(blacklistfunc2)
+
+        # movz x0, #0; ret
+        self.patch_data(blacklistfunc2_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
+
+        cas_idx = self.find_str('com.apple.System.\0')
+        cas_ref = self.xref(cas_idx)
+        cas_bof = self.bof(cas_ref)
+
+        # movz x0, #0; ret
+        self.patch_data(cas_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
 
     def get_cmd_handler_patch(self, command, ptr):
         cmd = bytes('\0' + command + '\0', 'utf-8')
@@ -149,68 +185,6 @@ class iBootPatcher(ARM64Patcher):
             return
         logger.debug(f'cmd_ref={hex(cmd_ref + self.base)}')
         self.apply_patch(cmd_ref + 8, ptr.to_bytes(8, byteorder='little'))
-
-    def get_unlock_nvram_patch(self):
-        debuguart_loc = self.memmem(b'debug-uarts')
-        if debuguart_loc == -1:
-            logger.error('Could not find debug-uarts string')
-            return
-        logger.debug(f'debuguart_loc={hex(debuguart_loc + self.base)}')
-        debuguart_ref = self.iboot_memmem(debuguart_loc)
-        logger.debug(f'debuguart_ref={hex(debuguart_ref + self.base)}')
-        setenv_whitelist = debuguart_ref
-        try:
-            while self.get_ptr_loc(setenv_whitelist):
-                setenv_whitelist -= 8
-        except:
-            pass
-        setenv_whitelist += 8
-        logger.debug(f'setenv_whitelist={hex(setenv_whitelist + self.base)}')
-        blacklistfunc = self.xref(setenv_whitelist)
-        if blacklistfunc == 0:
-            logger.error('Could not find setenv whitelist ref')
-            return -1
-        logger.debug(f'blacklistfunc={hex(blacklistfunc + self.base)}')
-        blacklistfunc_begin = self.bof(blacklistfunc)
-        if blacklistfunc_begin == 0:
-            logger.error('Could not find beginning of blacklistfunc')
-            return -1
-        logger.debug(f'blacklistfunc_begin={hex(blacklistfunc_begin + self.base)}')
-        self.apply_patch(blacklistfunc_begin, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
-        env_whitelist = setenv_whitelist
-        try:
-            while self.get_ptr_loc(env_whitelist):
-                env_whitelist += 8
-        except:
-            pass
-        env_whitelist += 8
-        logger.debug(f'env_whitelist={hex(env_whitelist + self.base)}')
-        blacklistfunc2 = self.xref(env_whitelist)
-        if blacklistfunc2 == 0:
-            logger.error('Could not find env whitelist ref')
-            return -1
-        logger.debug(f'blacklistfunc2={hex(blacklistfunc2 + self.base)}')
-        blacklistfunc2_begin = self.bof(blacklistfunc2)
-        if blacklistfunc_begin == 0:
-            logger.error('Could not find beginning of blacklistfunc2')
-            return -1
-        logger.debug(f'blacklistfunc2_begin={hex(blacklistfunc_begin + self.base)}')
-        self.apply_patch(blacklistfunc2_begin, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
-        com_apple_system_loc = self.memmem(b'com.apple.System.\0')
-        if com_apple_system_loc == -1:
-            logger.error('Could not find com_apple_system_loc')
-            return -1
-        logger.debug(f'com_apple_system_loc={hex(com_apple_system_loc + self.base)}')
-        com_apple_system_ref = self.xref(com_apple_system_loc)
-        logger.debug(f'com_apple_system_ref={hex(com_apple_system_ref)}')
-        com_apple_system_begin = self.bof(com_apple_system_ref)
-        if com_apple_system_begin == 0:
-            logger.error('Could not find com_apple_system_begin')
-            return -1
-        logger.debug(
-            f'com_apple_system_begin={hex(com_apple_system_begin + self.base)}'
-        )
-        self.apply_patch(com_apple_system_begin, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
 
     def get_bootarg_patch(self, bootargs):
         _bootargs = bytes(bootargs, 'utf-8')
