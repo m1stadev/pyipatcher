@@ -14,7 +14,9 @@ class NotFoundError(_PyiPatcherError, ValueError):
     def __init__(self, data_type: str, data: Optional[Any] = None) -> NoReturn:
         if data is None:
             error = f'{data_type} was not found in data'
-        elif not isinstance(data, (float, int, str)) and len(data) > 15:
+        elif not isinstance(data, (float, int)) and len(data) > 15:
             error = f'{data_type} "<{type(data).__name__} with len of {len(data)}>" was not found in data'
+        else:
+            error = f'{data_type} was not found in data: {data}'
 
         super().__init__(error)

@@ -75,9 +75,6 @@ class iBootPatcher(ARM64Patcher):
 
     @cached_property
     def stage(self) -> iBootStage:
-        if self.chip_id > 0x8010:
-            # TODO: A10+ has unified iBoot, error out
-            pass
         try:
             self.find_str('iBootStage1')
             return iBootStage.STAGE_1
@@ -90,7 +87,7 @@ class iBootPatcher(ARM64Patcher):
         except NotFoundError:
             pass
 
-        # TODO: Error out
+        # TODO: Add an enum for unified iBoot on A10+, error out
 
     @cached_property
     def version(self) -> iBootVersion:
@@ -114,12 +111,12 @@ class iBootPatcher(ARM64Patcher):
             case iBootPatch.SIG_CHECKS:
                 pass
             case iBootPatch.FRESH_NONCE:
-                pass
+                self.patch_freshnonce()
             case _:
                 raise ValueError('Invalid iBoot patch provided')
 
     def patch_debug_enabled(self):
-        logger.debug('Applying debug enabled patch')
+        logger.info('Applying debug enabled patch')
 
         de_idx = self.find_str('debug-enabled')
         de_xref = self.xref(de_idx)
@@ -133,7 +130,10 @@ class iBootPatcher(ARM64Patcher):
         self.patch_data(bl_insn, b'\x20\x00\x80\xD2')
 
     def patch_unlock_nvram(self):
-        logger.debug('Applying unlock nvram patch')
+        if self.stage == iBootStage.STAGE_1:
+            return #TODO: Error out
+
+        logger.info('Applying unlock nvram patch')
 
         du_idx = self.find_str('debug-uarts')
         du_xref = self.iboot_memmem(du_idx)
@@ -164,12 +164,35 @@ class iBootPatcher(ARM64Patcher):
         # movz x0, #0; ret
         self.patch_data(blacklistfunc2_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
 
+
+    def patch_freshnonce(self):
         cas_idx = self.find_str('com.apple.System.\0')
         cas_ref = self.xref(cas_idx)
         cas_bof = self.bof(cas_ref)
 
         # movz x0, #0; ret
         self.patch_data(cas_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
+
+        # freshnonce patch, shoutout cryptic
+        casbn_idx = self.find_str('com.apple.System.boot-nonce')
+        casbn_ref = self.xref(casbn_idx)
+
+        func1 = self.bof(casbn_ref)
+        func1_blref = self.xrefcode(func1)
+
+        func2 = self.bof(func1_blref)
+        func2_blref = self.xrefcode(func2)
+
+        branch_loc = func2_blref
+        while (
+            insn.supertype(insn.get_type(self.find_insn(func2_blref)))
+            != 'sut_branch_imm'
+        ):
+            branch_loc -= 4
+
+        # nop
+        self.patch_data(branch_loc, b'\x1F\x20\x03\xD5')
+
 
     def get_cmd_handler_patch(self, command, ptr):
         cmd = bytes('\0' + command + '\0', 'utf-8')
@@ -553,52 +576,6 @@ class iBootPatcher(ARM64Patcher):
                         self.apply_patch(
                             img4interposercallback_mov_x20, b'\x00\x00\x80\xD2'
                         )
-
-    def get_freshnonce_patch(self):
-        # check stage first
-        if self.stage1:
-            logger.debug('iBootStage1/iBSS detected, not patching nvram')
-            return
-        logger.debug('Not iBootStage1/iBSS, continuing')
-        noncevar_str = self.memmem(b'com.apple.System.boot-nonce\0')
-        if noncevar_str == -1:
-            logger.error("Could not find 'com.apple.System.boot-nonce'")
-            return -1
-        logger.debug(f'noncevar_str={hex(noncevar_str + self.base)}')
-        noncevar_ref = self.xref(noncevar_str)
-        if noncevar_ref == 0:
-            logger.error('Could not find noncevar_ref')
-            return -1
-        logger.debug(f'noncevar_ref={hex(noncevar_ref + self.base)}')
-        noncefun1 = self.bof(noncevar_ref)
-        if noncefun1 == 0:
-            logger.error('Could not find noncefun1')
-            return -1
-        logger.debug(f'noncefun1={hex(noncefun1 + self.base)}')
-        noncefun1_blref = self.xrefcode(noncefun1)
-        if noncefun1_blref == 0:
-            logger.error('Could not find noncefun1_blref')
-            return -1
-        logger.debug(f'noncefun1_blref={hex(noncefun1_blref + self.base)}')
-        noncefun2 = self.bof(noncefun1_blref)
-        if noncefun2 == 0:
-            logger.error('Could not find noncefun2')
-            return -1
-        logger.debug(f'noncefun2={hex(noncefun2 + self.base)}')
-        noncefun2_blref = self.xrefcode(noncefun2)
-        if noncefun2_blref == 0:
-            logger.error('Could not find noncefun2_blref')
-            return -1
-        logger.debug(f'noncefun2_blref={noncefun2_blref + self.base}')
-        noncefun2_blref -= 4
-        while (
-            insn.supertype(insn.get_type(self.get_insn(noncefun2_blref)))
-            != 'sut_branch_imm'
-        ):
-            noncefun2_blref -= 4
-        branch_loc = noncefun2_blref
-        logger.debug(f'branch_loc={hex(branch_loc + self.base)}')
-        self.apply_patch(branch_loc, b'\x1F\x20\x03\xD5')
 
     @property
     def output(self):
