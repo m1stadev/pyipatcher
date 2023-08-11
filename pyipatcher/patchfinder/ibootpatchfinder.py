@@ -107,7 +107,7 @@ class iBootPatcher(ARM64Patcher):
             case iBootPatch.UNLOCK_NVRAM:
                 self.patch_unlock_nvram()
             case iBootPatch.REBOOT_TO_FSBOOT:
-                pass
+                self.patch_reboot_fsboot()
             case iBootPatch.SIG_CHECKS:
                 pass
             case iBootPatch.FRESH_NONCE:
@@ -386,34 +386,17 @@ class iBootPatcher(ARM64Patcher):
         )
         self.apply_patch(adroff, opcode3.to_bytes(4, byteorder='little'))
 
-    def get_change_reboot_to_fsboot_patch(self):
-        rebootstr = self.memmem(b'reboot\x00')
-        if rebootstr == -1:
-            logger.error('Could not find rebootstr')
-            return -1
-        logger.debug(f'rebootstr={hex(rebootstr + self.base)}')
-        rebootrefstr = self.iboot_memmem(rebootstr)
-        if rebootrefstr == -1:
-            logger.error('Could not find rebootrefstr')
-            return -1
-        logger.debug(f'rebootrefstr={hex(rebootrefstr + self.base)}')
-        rebootref_ptr = rebootrefstr + 8
-        logger.debug(f'rebootref_ptr={hex(rebootref_ptr + self.base)}')
-        fsbootstr = self.memmem(b'fsboot\x00')
-        if fsbootstr == -1:
-            logger.error('Could not find fsbootstr')
-            return -1
-        logger.debug(f'fsbootstr={hex(fsbootstr + self.base)}')
-        self.apply_patch(rebootrefstr, fsbootstr.to_bytes(4, byteorder='little'))
-        fsbootrefstr = self.iboot_memmem(fsbootstr)
-        if fsbootrefstr == -1:
-            logger.error(f'Could not find fsbootrefstr')
-            return -1
-        logger.debug(f'fsbootrefstr={hex(fsbootrefstr + self.base)}')
-        fsbootfunc = self.get_ptr_loc(fsbootrefstr + 8)
-        logger.debug(f'fsbootfunc={hex(fsbootfunc)}')
-        self.apply_patch(
-            rebootrefstr + 8, (fsbootfunc - self.base).to_bytes(4, byteorder='little')
+    def patch_reboot_fsboot(self):
+        rbt_str = self.find_str(b'reboot\x00')
+        rbt_ref = self.iboot_memmem(rbt_str)
+
+        fsbt_str = self.find_str(b'fsboot\x00')
+        self.patch_data(rbt_ref, fsbt_str.to_bytes(4, byteorder='little'))
+        fsbt_ref = self.iboot_memmem(fsbt_str)
+
+        fsbt_func = self.find_ptr(fsbt_ref + 8)
+        self.patch_data(
+            rbt_ref + 8, (fsbt_func - self.base).to_bytes(4, byteorder='little')
         )
 
     def get_sigcheck_patch(self):
