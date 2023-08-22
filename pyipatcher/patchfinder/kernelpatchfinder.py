@@ -125,7 +125,7 @@ class KernelPatcher(ARM64Patcher):
         logger.debug(
             f'\'%s::%s() Performing img4 validation outside of workloop\' str ref at {hex(ent_ref)}'
         )
-        logger.debug(f'Patching str ref')
+        logger.debug('Patching str ref')
         self.apply_patch(ent_ref + 12, b'\x00\x00\x80\xd2')
 
     @property

@@ -146,9 +146,8 @@ class ARM64Patcher:
                 imm = (op >> 10) & 0xFFF
                 if shift == 1:
                     imm <<= 12
-                else:
-                    if shift > 1:
-                        continue
+                elif shift > 1:
+                    continue
 
                 value[reg] = value[rn] + imm
 
@@ -189,23 +188,16 @@ class ARM64Patcher:
         CBZ_MASK = 0x7E000000
         cbz = start
 
-        if not reverse:
-            while cbz:
-                insn = struct.unpack('<I', self._buf[cbz : cbz + 4])[0]
-                if insn & CBZ_MASK == 0x34000000:
-                    offset = ((insn & 0x00FFFFFF) >> 5) << 2
-                    if cbz + offset == start:
-                        return cbz
+        while cbz:
+            insn = struct.unpack('<I', self._buf[cbz : cbz + 4])[0]
+            if insn & CBZ_MASK == 0x34000000:
+                offset = ((insn & 0x00FFFFFF) >> 5) << 2
+                if cbz + offset == start:
+                    return cbz
 
+                if not reverse:
                     cbz += 4
-        else:
-            while cbz:
-                insn = struct.unpack('<I', self._buf[cbz : cbz + 4])[0]
-                if insn & CBZ_MASK == 0x34000000:
-                    offset = ((insn & 0x00FFFFFF) >> 5) << 2
-                    if cbz + offset == start:
-                        return cbz
-
+                else:
                     cbz -= 4
 
     def get_data(self, index: int, length: int) -> bytes:

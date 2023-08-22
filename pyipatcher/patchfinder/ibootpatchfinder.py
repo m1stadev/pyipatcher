@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def make_zeroes(n):
     zeroes = b''
-    for i in range(n):
+    for _ in range(n):
         zeroes += b'\x00'
     return zeroes
 
@@ -185,7 +185,7 @@ class iBootPatcher(ARM64Patcher):
 
         branch_loc = func2_blref
         while (
-            insn.supertype(insn.get_type(self.find_insn(func2_blref)))
+            insn.supertype(insn.get_type(self.find_insn(branch_loc)))
             != 'sut_branch_imm'
         ):
             branch_loc -= 4
@@ -217,14 +217,14 @@ class iBootPatcher(ARM64Patcher):
                 'Could not find default bootargs string loc, searching for alternative bootargs string'
             )
             default_ba_str_loc = self.memmem(b'rd=md0 -progress -restore')
-            if default_ba_str_loc == -1:
-                logger.debug(
-                    'Alternative bootargs string 1 could not be found, searching for another alternative bootargs string'
-                )
-                default_ba_str_loc = self.memmem(b'rd=md0')
-                if default_ba_str_loc == -1:
-                    logger.error('Could not find bootargs string')
-                    return -1
+        if default_ba_str_loc == -1:
+            logger.debug(
+                'Alternative bootargs string 1 could not be found, searching for another alternative bootargs string'
+            )
+            default_ba_str_loc = self.memmem(b'rd=md0')
+        if default_ba_str_loc == -1:
+            logger.error('Could not find bootargs string')
+            return -1
         logger.debug(f'default_ba_str_loc={hex(default_ba_str_loc + self.base)}')
         _7429_0 = self.vers >= 7429 and self.minor_vers >= 0
         _6723_100 = (
@@ -304,22 +304,21 @@ class iBootPatcher(ARM64Patcher):
                 return -1
             suboff = self.step_back(adr2_xref, adr2_xref, 0xD1000000, 0xFF000000)
             _reg = insn.rd(self.get_insn(suboff), 'sub')
-        else:
+        elif insn.get_type(self.get_insn(default_ba_xref)) == 'adr':
             if insn.get_type(self.get_insn(default_ba_xref)) != 'adr':
-                default_ba_xref -= 8
-                if insn.get_type(self.get_insn(default_ba_xref)) != 'bl':
-                    logger.error('Invalid instruction at default bootarg xref!')
-                    return -1
-                default_ba_xref += 4
-                _reg = insn.rd(
-                    self.get_insn(default_ba_xref),
-                    insn.get_type(self.get_insn(default_ba_xref)),
-                )
-            else:
-                if insn.get_type(self.get_insn(default_ba_xref)) != 'adr':
-                    logger.error('Invalid instruction at default bootarg xref!')
-                    return -1
-                _reg = insn.rd(self.get_insn(default_ba_xref), 'adr')
+                logger.error('Invalid instruction at default bootarg xref!')
+                return -1
+            _reg = insn.rd(self.get_insn(default_ba_xref), 'adr')
+        else:
+            default_ba_xref -= 8
+            if insn.get_type(self.get_insn(default_ba_xref)) != 'bl':
+                logger.error('Invalid instruction at default bootarg xref!')
+                return -1
+            default_ba_xref += 4
+            _reg = insn.rd(
+                self.get_insn(default_ba_xref),
+                insn.get_type(self.get_insn(default_ba_xref)),
+            )
         opcode = insn.new_insn_adr(default_ba_xref, default_ba_str_loc, _reg)
         self.apply_patch(default_ba_xref, opcode.to_bytes(4, byteorder='little'))
         logger.debug(f"Applying custom boot-args '{bootargs}'")
@@ -341,12 +340,9 @@ class iBootPatcher(ARM64Patcher):
             default_ba_xref, len(self) - default_ba_xref, 0x1A800000, 0x7FE00C00
         )
         logger.debug(f'cseloff={hex(cseloff + self.base)}')
-        if not (
-            xrefRD
-            in (
-                insn.rn(self.get_insn(cseloff), 'csel'),
-                insn.rm(self.get_insn(cseloff), 'csel'),
-            )
+        if xrefRD not in (
+            insn.rn(self.get_insn(cseloff), 'csel'),
+            insn.rm(self.get_insn(cseloff), 'csel'),
         ):
             logger.error('Invalid default_ba_xref rd')
             return -1
@@ -403,32 +399,30 @@ class iBootPatcher(ARM64Patcher):
         img4decodemanifestexists = 0
         ios14 = False
         if ios14 := (self.vers >= 6671):
-            if 8419 > self.vers >= 7459:
-                img4decodemanifestexists = self.memmem(
-                    b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\x28\x01\x00\xB4'
-                )
-            else:
-                img4decodemanifestexists = self.memmem(
+            img4decodemanifestexists = (
+                self.memmem(b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\x28\x01\x00\xB4')
+                if 8419 > self.vers >= 7459
+                else self.memmem(
                     b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\xE8\x00\x00\xB4'
                 )
+            )
+        elif (self.vers == 5540 and self.minor_vers >= 100) or self.vers > 5540:
+            img4decodemanifestexists = self.memmem(
+                b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\xE8\x00\x00\xB4'
+            )
+        elif (self.vers == 5540 and self.minor_vers <= 100) or (
+            3406 <= self.vers <= 5540
+        ):
+            img4decodemanifestexists = self.memmem(
+                b'\xE8\x03\x00\xAA\xE0\x07\x1F\x32\xE8\x00\x00\xB4'
+            )
         else:
-            if (self.vers == 5540 and self.minor_vers >= 100) or self.vers > 5540:
-                img4decodemanifestexists = self.memmem(
-                    b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\xE8\x00\x00\xB4'
-                )
-            elif (self.vers == 5540 and self.minor_vers <= 100) or (
-                3406 <= self.vers <= 5540
-            ):
-                img4decodemanifestexists = self.memmem(
-                    b'\xE8\x03\x00\xAA\xE0\x07\x1F\x32\xE8\x00\x00\xB4'
-                )
-            else:
-                logger.error(
-                    f'Unsupported iBoot (iBoot-{self.vers}.{self.minor_vers}), only iOS 10 or later iBoot is supported'
-                )
-                return -1
+            logger.error(
+                f'Unsupported iBoot (iBoot-{self.vers}.{self.minor_vers}), only iOS 10 or later iBoot is supported'
+            )
+            return -1
         if img4decodemanifestexists == -1:
-            logger.error(f'Could not find img4decodemanifestexists')
+            logger.error('Could not find img4decodemanifestexists')
             return -1
         logger.debug(
             f'img4decodemanifestexists={hex(img4decodemanifestexists + self.base)}'
@@ -455,7 +449,7 @@ class iBootPatcher(ARM64Patcher):
                 return -1
         img4interposercallback_ptr = insn.imm(adroff, self.get_insn(adroff), 'adr')
         if img4interposercallback_ptr == -1:
-            logger.debug(f'Could not find img4interposercallback_ptr')
+            logger.debug('Could not find img4interposercallback_ptr')
             return -1
         logger.debug(
             f'img4interposercallback_ptr={hex(int(img4interposercallback_ptr) + self.base)}'
@@ -491,74 +485,74 @@ class iBootPatcher(ARM64Patcher):
                 f'img4interposercallback_ret2={hex(img4interposercallback_ret2 + self.base)}'
             )
             self.apply_patch(img4interposercallback_ret2 - 4, b'\x00\x00\x80\xD2')
-        else:
-            if (
-                self.step_back(real_img4interposercallback, 4, 0x91000000, 0xFF000000)
-                != 0
-            ):  # an add
-                real_img4interposercallback = self.step_back(
-                    real_img4interposercallback - 8,
-                    real_img4interposercallback,
-                    0xA94000F0,
-                    0xFFF000F0,
-                    reversed=True,
-                )  # sill an ldp
-                if insn.get_type(self.get_insn(real_img4interposercallback)) != 'mov':
-                    real_img4interposercallback = self.step_back(
-                        real_img4interposercallback,
-                        real_img4interposercallback,
-                        0x1F2003D5,
-                        0xFFFFFFFF,
+        elif (
+            self.step_back(real_img4interposercallback, 4, 0x91000000, 0xFF000000)
+            == 0
+        ):
+            self.apply_patch(img4interposercallback_ret - 4, b'\x00\x00\x80\xD2')
+            boff = self.step_back(
+                img4interposercallback_ret,
+                img4interposercallback_ret,
+                0x14000000,
+                0xFC000000,
+            )
+            if self.step_back(boff, 4, 0xA94000F0, 0xFFF000F0) == 0:
+                boff = self.step_back(boff - 4, boff - 4, 0x14000000, 0xFC000000)
+                if self.step_back(boff, 4, 0xA94000F0, 0xFFF000F0) == 0:
+                    logger.error(
+                        'img4interposercallback couldn\'t find branch for ret2'
                     )
-                img4interposercallback_mov = real_img4interposercallback
-                if img4interposercallback_mov == 0:
-                    logger.error('Could not find img4interposercallback_mov')
                     return -1
-                logger.debug(
-                    f'img4interposercallback_mov={hex(img4interposercallback_mov + self.base)}'
-                )
-                self.apply_patch(img4interposercallback_mov, b'\x00\x00\x80\xD2')
-                retoff = self.step(
+                else:
+                    img4interposercallback_mov_x20 = self.step_back(
+                        boff, boff, 0xAA0003E0, 0xFFE0FFE0, dbg=0
+                    )
+                    logger.debug(
+                        f'img4interposercallback_mov_x20={hex(img4interposercallback_mov_x20 + self.base)}'
+                    )
+                    self.apply_patch(
+                        img4interposercallback_mov_x20, b'\x00\x00\x80\xD2'
+                    )
+
+        else:  # an add
+            real_img4interposercallback = self.step_back(
+                real_img4interposercallback - 8,
+                real_img4interposercallback,
+                0xA94000F0,
+                0xFFF000F0,
+                reversed=True,
+            )  # sill an ldp
+            if insn.get_type(self.get_insn(real_img4interposercallback)) != 'mov':
+                real_img4interposercallback = self.step_back(
                     real_img4interposercallback,
-                    len(self) - real_img4interposercallback,
-                    0xD65F03C0,
+                    real_img4interposercallback,
+                    0x1F2003D5,
                     0xFFFFFFFF,
                 )
-                img4interposercallback_ret2 = self.step(
-                    retoff + 4, len(self) - retoff, 0xD65F03C0, 0xFFFFFFFF
-                )
-                if img4interposercallback_ret2 == 0:
-                    logger.error('Could not find img4interposercallback_ret2')
-                    return -1
-                logger.debug(
-                    f'img4interposercallback_ret2={hex(img4interposercallback_ret2 + self.base)}'
-                )
-                self.apply_patch(img4interposercallback_ret2 - 4, b'\x00\x00\x80\xD2')
-            else:
-                self.apply_patch(img4interposercallback_ret - 4, b'\x00\x00\x80\xD2')
-                boff = self.step_back(
-                    img4interposercallback_ret,
-                    img4interposercallback_ret,
-                    0x14000000,
-                    0xFC000000,
-                )
-                if self.step_back(boff, 4, 0xA94000F0, 0xFFF000F0) == 0:
-                    boff = self.step_back(boff - 4, boff - 4, 0x14000000, 0xFC000000)
-                    if self.step_back(boff, 4, 0xA94000F0, 0xFFF000F0) == 0:
-                        logger.error(
-                            'img4interposercallback couldn\'t find branch for ret2'
-                        )
-                        return -1
-                    else:
-                        img4interposercallback_mov_x20 = self.step_back(
-                            boff, boff, 0xAA0003E0, 0xFFE0FFE0, dbg=0
-                        )
-                        logger.debug(
-                            f'img4interposercallback_mov_x20={hex(img4interposercallback_mov_x20 + self.base)}'
-                        )
-                        self.apply_patch(
-                            img4interposercallback_mov_x20, b'\x00\x00\x80\xD2'
-                        )
+            img4interposercallback_mov = real_img4interposercallback
+            if img4interposercallback_mov == 0:
+                logger.error('Could not find img4interposercallback_mov')
+                return -1
+            logger.debug(
+                f'img4interposercallback_mov={hex(img4interposercallback_mov + self.base)}'
+            )
+            self.apply_patch(img4interposercallback_mov, b'\x00\x00\x80\xD2')
+            retoff = self.step(
+                real_img4interposercallback,
+                len(self) - real_img4interposercallback,
+                0xD65F03C0,
+                0xFFFFFFFF,
+            )
+            img4interposercallback_ret2 = self.step(
+                retoff + 4, len(self) - retoff, 0xD65F03C0, 0xFFFFFFFF
+            )
+            if img4interposercallback_ret2 == 0:
+                logger.error('Could not find img4interposercallback_ret2')
+                return -1
+            logger.debug(
+                f'img4interposercallback_ret2={hex(img4interposercallback_ret2 + self.base)}'
+            )
+            self.apply_patch(img4interposercallback_ret2 - 4, b'\x00\x00\x80\xD2')
 
     @property
     def output(self):

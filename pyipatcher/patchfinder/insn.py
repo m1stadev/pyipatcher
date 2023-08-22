@@ -152,9 +152,7 @@ def subtype(opcode, type):
             return 'imm'
         return None
     elif type == 'ccmp':
-        if BIT_RANGE(opcode, 21, 30) == 0b1111010010:
-            return 'reg'
-        return None
+        return 'reg' if BIT_RANGE(opcode, 21, 30) == 0b1111010010 else None
     elif type in ('movz', 'movk'):
         return 'imm'
     elif type == 'mov':
@@ -212,9 +210,9 @@ def imm(pc, opcode, type) -> int:
     elif type == 'ldrh':
         if st != 'st_immediate':
             return -1
-        if (BIT_RANGE(opcode, 21, 31) == 0b01111000010) and (
-            (BIT_RANGE(opcode, 10, 11) == 0b01) or (BIT_RANGE(opcode, 10, 11) == 0b11)
-        ):
+        if BIT_RANGE(opcode, 21, 31) == 0b01111000010 and BIT_RANGE(
+            opcode, 10, 11
+        ) in [0b01, 0b11]:
             return BIT_RANGE(opcode, 12, 20)
         else:
             return BIT_RANGE(opcode, 10, 21) << BIT_RANGE(opcode, 30, 31)
@@ -227,7 +225,6 @@ def imm(pc, opcode, type) -> int:
             return BIT_RANGE(opcode, 12, 20) << BIT_RANGE(opcode, 30, 31)
     elif type == 'str':
         return BIT_RANGE(opcode, 10, 21) << (opcode >> 30)
-    # orr, and_ unsupported
     elif type == 'tbz':
         return BIT_RANGE(opcode, 5, 18)
     elif type == 'stp':
@@ -297,12 +294,13 @@ def new_insn_adr(pc, imm, rd):
     opcode = 0
     opcode |= SET_BITS(16, 24)
     opcode |= SET_BITS(rd & 31, 0)
-    if imm > pc:
-        if (imm - pc) >= (1 << 20):
-            return -1
-    else:
-        if (pc - imm) >= (1 << 20):
-            return -1
+    if (
+        imm > pc
+        and (imm - pc) >= (1 << 20)
+        or imm <= pc
+        and (pc - imm) >= (1 << 20)
+    ):
+        return -1
     imm -= pc
     opcode |= SET_BITS(BIT_RANGE(imm, 0, 1), 29)
     opcode |= SET_BITS(BIT_RANGE(imm, 2, 20), 5)
