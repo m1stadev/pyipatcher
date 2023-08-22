@@ -42,7 +42,7 @@ class iBootPatcher(ARM64Patcher):
         if self.stage != iBootStage.STAGE_2:
             raise ValueError('Provided iBoot is not stage 2')
 
-        cpid_idx = self.find_str('platform-name') + 1
+        cpid_idx = self.find_data('platform-name') + 1
         cpid = ''
         while True:
             char = self.get_data(cpid_idx, 1).decode()
@@ -60,7 +60,7 @@ class iBootPatcher(ARM64Patcher):
     @cached_property
     def has_kernel_load(self) -> bool:
         try:
-            self.find_str('__PAGEZERO')
+            self.find_data('__PAGEZERO')
             return True
         except NotFoundError:
             return False
@@ -68,7 +68,7 @@ class iBootPatcher(ARM64Patcher):
     @cached_property
     def has_recovery_console(self) -> bool:
         try:
-            self.find_str('Entering recovery mode, starting command prompt')
+            self.find_data('Entering recovery mode, starting command prompt')
             return True
         except NotFoundError:
             return False
@@ -76,13 +76,13 @@ class iBootPatcher(ARM64Patcher):
     @cached_property
     def stage(self) -> iBootStage:
         try:
-            self.find_str('iBootStage1')
+            self.find_data('iBootStage1')
             return iBootStage.STAGE_1
         except NotFoundError:
             pass
 
         try:
-            self.find_str('iBootStage2')
+            self.find_data('iBootStage2')
             return iBootStage.STAGE_2
         except NotFoundError:
             pass
@@ -91,14 +91,14 @@ class iBootPatcher(ARM64Patcher):
 
     @cached_property
     def version(self) -> iBootVersion:
-        vers_idx = self.find_str('iBoot-')
+        vers_idx = self.find_data('iBoot-')
         vers_str = self.get_data(vers_idx + 6, 10).split(b'.')[:2]
 
         return iBootVersion(int(vers_str[0]), int(vers_str[1]))
 
-    def iboot_memmem(self, needle):
+    def find_iboot_data(self, needle):
         needle = (needle + self.base).to_bytes(8, byteorder='little')
-        return self.find_str(needle)
+        return self.find_data(needle)
 
     def apply_patch(self, patch: iBootPatch) -> None:
         match patch:
@@ -118,7 +118,7 @@ class iBootPatcher(ARM64Patcher):
     def patch_debug_enabled(self):
         logger.info('Applying debug enabled patch')
 
-        de_idx = self.find_str('debug-enabled')
+        de_idx = self.find_data('debug-enabled')
         de_xref = self.xref(de_idx)
 
         for _ in range(2):
@@ -131,12 +131,12 @@ class iBootPatcher(ARM64Patcher):
 
     def patch_unlock_nvram(self):
         if self.stage == iBootStage.STAGE_1:
-            return #TODO: Error out
+            return  # TODO: Error out
 
         logger.info('Applying unlock nvram patch')
 
-        du_idx = self.find_str('debug-uarts')
-        du_xref = self.iboot_memmem(du_idx)
+        du_idx = self.find_data('debug-uarts')
+        du_xref = self.find_iboot_data(du_idx)
 
         whitelist1 = du_xref
         while True:
@@ -164,9 +164,177 @@ class iBootPatcher(ARM64Patcher):
         # movz x0, #0; ret
         self.patch_data(blacklistfunc2_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
 
+    def patch_reboot_fsboot(self):
+        rbt_str = self.find_data('reboot\x00')
+        rbt_ref = self.find_iboot_data(rbt_str)
+
+        fsbt_str = self.find_data('fsboot\x00')
+        self.patch_data(rbt_ref, fsbt_str.to_bytes(4, byteorder='little'))
+        fsbt_ref = self.find_iboot_data(fsbt_str)
+
+        fsbt_func = self.find_ptr(fsbt_ref + 8)
+        self.patch_data(
+            rbt_ref + 8, (fsbt_func - self.base).to_bytes(4, byteorder='little')
+        )
+
+    def get_sigcheck_patch(self):
+        img4decodemanifestexists = 0
+        ios14plus = (self.vers >= 6671)
+        if ios14plus:
+            if 8419 > self.vers >= 7459:
+                img4decodemanifestexists = self.find_data(
+                    b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\x28\x01\x00\xB4'
+                )
+            else:
+                img4decodemanifestexists = self.find_data(
+                    b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\xE8\x00\x00\xB4'
+                )
+        else:
+            if (self.vers == 5540 and self.minor_vers >= 100) or self.vers > 5540:
+                img4decodemanifestexists = self.find_data(
+                    b'\xE8\x03\x00\xAA\xC0\x00\x80\x52\xE8\x00\x00\xB4'
+                )
+            elif (self.vers == 5540 and self.minor_vers <= 100) or (
+                3406 <= self.vers <= 5540
+            ):
+                img4decodemanifestexists = self.find_data(
+                    b'\xE8\x03\x00\xAA\xE0\x07\x1F\x32\xE8\x00\x00\xB4'
+                )
+        if img4decodemanifestexists == -1:
+            logger.error(f'Could not find img4decodemanifestexists')
+            return -1
+        logger.debug(
+            f'img4decodemanifestexists={hex(img4decodemanifestexists + self.base)}'
+        )
+        img4decodemanifestexists_ref = self.xrefcode(img4decodemanifestexists)
+        if img4decodemanifestexists_ref == 0:
+            logger.error('Could not find img4decodemanifestexists_ref')
+            return -1
+        logger.debug(
+            f'img4decodemanifestexists_ref={hex(img4decodemanifestexists_ref + self.base)}'
+        )
+        adroff = self.step(
+            img4decodemanifestexists_ref,
+            len(self) - img4decodemanifestexists_ref,
+            0x10000000,
+            0x9F000000,
+        )
+        if insn.rd(self.get_insn(adroff), 'adr') != 2:
+            adroff = self.step(
+                img4decodemanifestexists_ref, len(self) - adroff, 0x10000000, 0x9F000000
+            )
+            if insn.rd(self.get_insn(adroff), 'adr') != 2:
+                logger.error('Could not find adroff')
+                return -1
+        img4interposercallback_ptr = insn.imm(adroff, self.get_insn(adroff), 'adr')
+        if img4interposercallback_ptr == -1:
+            logger.debug('Could not find img4interposercallback_ptr')
+            return -1
+        logger.debug(
+            f'img4interposercallback_ptr={hex(int(img4interposercallback_ptr) + self.base)}'
+        )
+        img4interposercallback = self.get_ptr_loc(img4interposercallback_ptr)
+        real_img4interposercallback = img4interposercallback - self.base
+        logger.debug(f'img4interposercallback={hex(img4interposercallback)}')
+        real_img4interposercallback = self.step(
+            real_img4interposercallback,
+            len(self) - real_img4interposercallback,
+            0xD65F03C0,
+            0xFFFFFFFF,
+        )
+        img4interposercallback_ret = real_img4interposercallback
+        if img4interposercallback_ret == 0:
+            logger.error('Could not find img4interposercallback_ret')
+            return -1
+        logger.debug(
+            f'img4interposercallback_ret={hex(img4interposercallback_ret + self.base)}'
+        )
+        if not ios14plus:
+            self.apply_patch(
+                img4interposercallback_ret, b'\x00\x00\x80\xD2\xC0\x03\x5F\xD6'
+            )
+            real_img4interposercallback += 4
+            img4interposercallback_ret2 = self.step(
+                real_img4interposercallback + 4,
+                len(self) - real_img4interposercallback,
+                0xD65F03C0,
+                0xFFFFFFFF,
+            )
+            logger.debug(
+                f'img4interposercallback_ret2={hex(img4interposercallback_ret2 + self.base)}'
+            )
+            self.apply_patch(img4interposercallback_ret2 - 4, b'\x00\x00\x80\xD2')
+        elif (
+            self.step_back(real_img4interposercallback, 4, 0x91000000, 0xFF000000)
+            == 0
+        ):
+            self.apply_patch(img4interposercallback_ret - 4, b'\x00\x00\x80\xD2')
+            boff = self.step_back(
+                img4interposercallback_ret,
+                img4interposercallback_ret,
+                0x14000000,
+                0xFC000000,
+            )
+            if self.step_back(boff, 4, 0xA94000F0, 0xFFF000F0) == 0:
+                boff = self.step_back(boff - 4, boff - 4, 0x14000000, 0xFC000000)
+                if self.step_back(boff, 4, 0xA94000F0, 0xFFF000F0) == 0:
+                    logger.error(
+                        'img4interposercallback couldn\'t find branch for ret2'
+                    )
+                    return -1
+                else:
+                    img4interposercallback_mov_x20 = self.step_back(
+                        boff, boff, 0xAA0003E0, 0xFFE0FFE0, dbg=0
+                    )
+                    logger.debug(
+                        f'img4interposercallback_mov_x20={hex(img4interposercallback_mov_x20 + self.base)}'
+                    )
+                    self.apply_patch(
+                        img4interposercallback_mov_x20, b'\x00\x00\x80\xD2'
+                    )
+
+        else:  # an add
+            real_img4interposercallback = self.step_back(
+                real_img4interposercallback - 8,
+                real_img4interposercallback,
+                0xA94000F0,
+                0xFFF000F0,
+                reversed=True,
+            )  # sill an ldp
+            if insn.get_type(self.get_insn(real_img4interposercallback)) != 'mov':
+                real_img4interposercallback = self.step_back(
+                    real_img4interposercallback,
+                    real_img4interposercallback,
+                    0x1F2003D5,
+                    0xFFFFFFFF,
+                )
+            img4interposercallback_mov = real_img4interposercallback
+            if img4interposercallback_mov == 0:
+                logger.error('Could not find img4interposercallback_mov')
+                return -1
+            logger.debug(
+                f'img4interposercallback_mov={hex(img4interposercallback_mov + self.base)}'
+            )
+            self.apply_patch(img4interposercallback_mov, b'\x00\x00\x80\xD2')
+            retoff = self.step(
+                real_img4interposercallback,
+                len(self) - real_img4interposercallback,
+                0xD65F03C0,
+                0xFFFFFFFF,
+            )
+            img4interposercallback_ret2 = self.step(
+                retoff + 4, len(self) - retoff, 0xD65F03C0, 0xFFFFFFFF
+            )
+            if img4interposercallback_ret2 == 0:
+                logger.error('Could not find img4interposercallback_ret2')
+                return -1
+            logger.debug(
+                f'img4interposercallback_ret2={hex(img4interposercallback_ret2 + self.base)}'
+            )
+            self.apply_patch(img4interposercallback_ret2 - 4, b'\x00\x00\x80\xD2')
 
     def patch_freshnonce(self):
-        cas_idx = self.find_str('com.apple.System.\0')
+        cas_idx = self.find_data('com.apple.System.\0')
         cas_ref = self.xref(cas_idx)
         cas_bof = self.bof(cas_ref)
 
@@ -174,7 +342,7 @@ class iBootPatcher(ARM64Patcher):
         self.patch_data(cas_bof, b'\x00\x00\x80\xd2\xc0\x03_\xd6')
 
         # freshnonce patch, shoutout cryptic
-        casbn_idx = self.find_str('com.apple.System.boot-nonce')
+        casbn_idx = self.find_data('com.apple.System.boot-nonce')
         casbn_ref = self.xref(casbn_idx)
 
         func1 = self.bof(casbn_ref)
@@ -193,7 +361,6 @@ class iBootPatcher(ARM64Patcher):
         # nop
         self.patch_data(branch_loc, b'\x1F\x20\x03\xD5')
 
-
     def get_cmd_handler_patch(self, command, ptr):
         cmd = bytes('\0' + command + '\0', 'utf-8')
         cmd_loc = self.memmem(cmd)
@@ -202,7 +369,7 @@ class iBootPatcher(ARM64Patcher):
             return
         cmd_loc += 1
         logger.debug(f'cmd_loc={hex(cmd_loc + self.base)}')
-        cmd_ref = self.iboot_memmem(cmd_loc)
+        cmd_ref = self.find_iboot_data(cmd_loc)
         if cmd_ref == -1:
             logger.error('Could not find command ref')
             return
@@ -383,12 +550,12 @@ class iBootPatcher(ARM64Patcher):
         self.apply_patch(adroff, opcode3.to_bytes(4, byteorder='little'))
 
     def patch_reboot_fsboot(self):
-        rbt_str = self.find_str(b'reboot\x00')
-        rbt_ref = self.iboot_memmem(rbt_str)
+        rbt_str = self.find_data(b'reboot\x00')
+        rbt_ref = self.find_iboot_data(rbt_str)
 
-        fsbt_str = self.find_str(b'fsboot\x00')
+        fsbt_str = self.find_data(b'fsboot\x00')
         self.patch_data(rbt_ref, fsbt_str.to_bytes(4, byteorder='little'))
-        fsbt_ref = self.iboot_memmem(fsbt_str)
+        fsbt_ref = self.find_iboot_data(fsbt_str)
 
         fsbt_func = self.find_ptr(fsbt_ref + 8)
         self.patch_data(

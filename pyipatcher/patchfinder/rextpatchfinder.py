@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class REXTPatcher(ARM64Patcher):
     def get_skip_sealing_patch(self):
-        skip_sealing = self.find_str(b'Skipping sealing system volume')
+        skip_sealing = self.find_data(b'Skipping sealing system volume')
         if skip_sealing == -1:
             logger.error('Could not find skip_sealing str')
             return

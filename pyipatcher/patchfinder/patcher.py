@@ -39,10 +39,10 @@ class ARM64Patcher:
     def data(self) -> bytes:
         return bytes(self._data)
 
-    def find_str(
+    def find_data(
         self, string: Union[bytes, str], start: int = 0, end: Optional[int] = None
     ) -> int:
-        '''Locate where a substring is.'''
+        '''Locate where a byte string is.'''
 
         if type(string) == str:
             string = str.encode(string)
